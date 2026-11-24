@@ -2,7 +2,7 @@
 
 Documentation de référence pour évaluer un parc Windows avant de faire de PowerShell 7 (`pwsh.exe`) l'environnement par défaut : différences techniques, compatibilité des modules, changements de syntaxe, règles d'exécution côte à côte et checklist d'audit.
 
-> **Statut du contenu.** Ce document est une synthèse dérivée d'un article de presse et de documentation Microsoft Learn, compilée via un outil de recherche assisté par IA. Les points marqués « à vérifier » doivent être confrontés à la documentation officielle avant toute décision de production (voir [Limites](#limites-et-points-à-vérifier)).
+> **Statut du contenu.** Synthèse dérivée d'un article de presse et de documentation Microsoft Learn, compilée à l'origine via un outil de recherche assisté par IA, puis partiellement recoupée avec des pages Microsoft le 24 novembre 2026. Ce qui est confirmé, corrigé ou reste à vérifier est détaillé dans [Limites](#limites-et-points-à-vérifier). À confronter à la documentation officielle avant toute décision de production.
 
 ## Récupérer le dépôt
 
@@ -27,14 +27,16 @@ cd PowerShell-5-1-to-7-Migration
 - [Stratégie de migration recommandée](#stratégie-de-migration-recommandée)
 - [Limites et points à vérifier](#limites-et-points-à-vérifier)
 - [Sources](#sources)
+- [Licence](#licence)
 
 ## Contexte
 
 Microsoft a annoncé que PowerShell 7 sera inclus par défaut dans la prochaine version de Windows, et que Windows PowerShell 5.1 est déprécié. Les deux versions continuent de coexister : PowerShell 7 ne remplace pas 5.1.
 
-- Windows 10 et Windows 11 embarquent aujourd'hui PowerShell 5.1.
-- L'échéance avancée par la presse est la version 27H2, au second semestre 2027. Il s'agit d'une estimation (« vraisemblablement »), pas d'une date confirmée dans les sources consultées.
-- PowerShell 7.6 LTS est indiqué comme supporté jusqu'au 14 novembre 2028.
+- Windows 10 et Windows 11 embarquent aujourd'hui PowerShell 5.1. D'après l'annonce de Microsoft relayée par la presse, Windows Server 2025 et Windows 11 26H2 sont les dernières versions à l'activer par défaut.
+- Dans la prochaine version de Windows, PowerShell 7 sera inclus et 5.1 deviendra une fonctionnalité à la demande (activée par défaut sur les nouvelles installations). Il disparaîtra ensuite d'une version ultérieure, dont le calendrier sera communiqué à l'avance.
+- Microsoft n'a pas nommé cette prochaine version. 27H2 (second semestre 2027) est une estimation de la presse, pas une date confirmée.
+- PowerShell 7.6 LTS est indiqué comme supporté jusqu'au 14 novembre 2028 : information issue du PDF source, non recoupée. PowerShell 7.7 est sorti le 10 novembre 2026.
 
 Un script qui s'exécute sans erreur sous PowerShell 7 peut produire un résultat différent de celui obtenu sous 5.1. La migration doit donc être validée par des tests, pas seulement par une exécution réussie.
 
@@ -42,7 +44,7 @@ Un script qui s'exécute sans erreur sous PowerShell 7 peut produire un résulta
 
 | Aspect | Windows PowerShell 5.1 | PowerShell 7 |
 |---|---|---|
-| Runtime | .NET Framework | .NET moderne (anciennement .NET Core) |
+| Runtime | .NET Framework (v4.5 selon Microsoft Learn) | .NET moderne (anciennement .NET Core) |
 | Plateformes | Windows uniquement | Windows, macOS, Linux |
 | Installation | Composant intégré à Windows | Installation séparée, coexiste avec 5.1 |
 | Modules Windows | Accès natif à l'écosystème Windows | Beaucoup fonctionnent nativement, d'autres via la couche de compatibilité |
@@ -71,6 +73,16 @@ Un script qui s'exécute sans erreur sous PowerShell 7 peut produire un résulta
 - `-Encoding Byte` devient `-AsByteStream`.
 - Ces changements peuvent casser des traitements de fichiers ou des échanges avec des outils externes.
 
+### Distribution MSIX (points à tester)
+
+PowerShell 7 est livré dans Windows sous forme de paquet MSIX. D'après la presse (Next, Techzine) :
+
+- l'installation se fait dans un dossier protégé en lecture seule et s'enregistre par utilisateur, là où le MSI s'installait pour toute la machine ;
+- trois points restent ouverts côté Microsoft : l'exécution sous le compte SYSTEM (tâches planifiées, services, gestion d'appareils, remoting), la prise en charge des cmdlets DISM comme `Add-WindowsCapability`, et les paramètres à l'échelle de la machine ;
+- les stratégies de journalisation (modules, blocs de script, transcription) sont à redéployer pour PS7, et une supervision basée sur les journaux de 5.1 ne verra pas l'activité de PS7 sans adaptation.
+
+Ces éléments viennent de sources secondaires : à confirmer dans la documentation Microsoft.
+
 ## Matrice de migration
 
 | Domaine | Windows PowerShell 5.1 | PowerShell 7 | Implication de migration |
@@ -84,7 +96,7 @@ Un script qui s'exécute sans erreur sous PowerShell 7 peut produire un résulta
 | Modules machine | `%ProgramFiles%\WindowsPowerShell\Modules` | `%ProgramFiles%\PowerShell\Modules` | Prévoir un déploiement distinct des modules AllUsers pour PS7. |
 | Modules système | `%SystemRoot%\System32\WindowsPowerShell\1.0\Modules` | Inclut `%windir%\System32` au démarrage, mais n'expose que les modules marqués compatibles Core | Un module système peut être invisible ou refusé dans PS7 selon son manifeste. |
 | Encodage | Souvent Windows-1252 / ASCII selon le contexte | `$OutputEncoding` par défaut en UTF-8 sans BOM | Vérifier sorties, fichiers CSV, logs, accents et intégrations avec les outils externes. |
-| Erreurs natives | `$?` pouvait devenir faux si stderr était écrit | `$?` ne devient faux que sur code de sortie non nul | Revoir les contrôles de réussite fondés sur `$?` et sur la présence de stderr. |
+| Erreurs natives | `$?` pouvait devenir faux quand l'exécutable écrivait sur stderr (non confirmé par une page Microsoft, voir [Limites](#limites-et-points-à-vérifier)) | `$?` suit le code de sortie : vrai si 0, faux sinon | Revoir les contrôles de réussite fondés sur `$?` et sur la présence de stderr. Avant PS7, `$?` était aussi remis à vrai dans `(...)`, `$(...)` et `@(...)`. |
 | CSV | `Export-Csv` inclut les informations de type | `-NoTypeInformation` est le comportement par défaut | Ajouter `-IncludeTypeInformation` si un consommateur dépend de l'en-tête de type. |
 | Web | `Invoke-WebRequest` / `Invoke-RestMethod` sur l'ancienne pile .NET | Fondés sur `HttpClient` ; parsing HTML simplifié, en-têtes plus stricts, FTP et `file://` non supportés | Auditer les scripts d'API, de téléchargement, de formulaires et d'authentification. |
 | Remoting DCOM | Certains cmdlets acceptaient `-Protocol DCOM` | DCOM n'est plus supporté pour le remoting | Migrer vers WinRM/PSRP ou `Invoke-Command`. |
@@ -103,7 +115,7 @@ Trois statuts sont possibles pour un module dans PowerShell 7 : **natif**, **via
 | `PSScheduledJob` | Non supporté par la couche de compatibilité ; module intégré à Windows PowerShell 5.1 et explicitement sur la deny list. | Réécrire avec `ScheduledTasks`, le Planificateur de tâches Windows, des jobs PS7 ou un outil d'orchestration ; ne pas compter sur `-UseWindowsPowerShell`. |
 | `PSWorkflow` | Retiré de PowerShell 7 ; PowerShell Workflow repose sur Windows Workflow Foundation, absent de .NET moderne. Marqué « untested with compatibility layer » dans le tableau Microsoft. | Réécrire : `ForEach-Object -Parallel` pour le parallélisme simple, Planificateur de tâches pour la reprise après redémarrage, persistance d'état explicite si nécessaire. |
 | `PSWorkflowUtility` | Retiré de PowerShell 7. | Migrer avec `PSWorkflow`. |
-| `Microsoft.PowerShell.LocalAccounts` | Retiré de PowerShell 7. | Utiliser les cmdlets Windows natives, CIM, ou un module de gestion des comptes locaux approprié. |
+| `Microsoft.PowerShell.LocalAccounts` | N'est plus livré avec PowerShell 7, mais Microsoft le classe « Natively Compatible » sur Windows 10 / Server 1809+ (module fourni par Windows). | Tester `Get-LocalUser` et `Get-LocalGroup` sous `pwsh` sur la version de Windows cible ; ne prévoir une alternative que si le module ne se charge pas. |
 | `Microsoft.PowerShell.ODataUtils` | Retiré de PowerShell 7. | Remplacer par une intégration OData/REST moderne ou conserver 5.1 temporairement. |
 | `Microsoft.PowerShell.Operation.Validation` | Retiré de PowerShell 7. | Remplacer par Pester ou un framework de tests dédié. |
 | Modules WMI v1 | Retirés : `Get-WmiObject`, `Invoke-WmiMethod`, `Set-WmiInstance`, `Remove-WmiObject`, `Register-WmiEvent`. | Migrer vers CIM v2. |
@@ -124,13 +136,15 @@ Trois statuts sont possibles pour un module dans PowerShell 7 : **natif**, **via
 Import-Module -Name ScheduledTasks -UseWindowsPowerShell
 ```
 
+La couche se déclenche aussi de façon implicite : l'import par nom ou par chemin, ou le chargement automatique d'un module Windows PowerShell non marqué compatible Core, passe par le même mécanisme. Ce comportement se désactive avec le paramètre `DisableImplicitWinCompat` du fichier `powershell.config.json`.
+
 | Règle | Conséquence |
 |---|---|
 | Fonctionne uniquement en local sur Windows | Ne pas l'utiliser pour une automatisation Linux/macOS ni pour un scénario distant. |
 | Exige Windows PowerShell 5.1 | 5.1 doit rester installé et opérationnel. |
 | Sérialise paramètres et résultats | Les objets retournés ne sont pas des objets vivants : méthodes, propriétés dynamiques et références d'objet peuvent être perdues ou modifiées. |
 | Partage un runspace entre les modules importés dans la session de compatibilité | États, variables et effets de bord peuvent interagir entre modules. |
-| Respecte une deny list | `PSScheduledJob`, `BestPractices` et `UpdateServices` figurent notamment dans la liste des modules bloqués. |
+| Respecte une deny list | Valeur par défaut de `WindowsPowerShellCompatibilityModuleDenyList` : `PSScheduledJob`, `BestPractices` et `UpdateServices`. |
 | N'est pas un substitut à la compatibilité native | À réserver aux dépendances à court terme, avec un plan de remplacement. |
 
 La latence et les différences de comportement induites par le processus 5.1 en arrière-plan doivent être mesurées.
@@ -230,6 +244,15 @@ Ne pas copier aveuglément le profil 5.1 dans PS7 : il peut charger des modules 
 - [ ] Ne pas modifier globalement `PSModulePath` sans tester l'effet sur les deux éditions et sur les processus enfants.
 - [ ] Documenter les modules conservés en 5.1 : propriétaire, raison, date de retrait prévue.
 
+### Distribution, comptes et journalisation
+
+- [ ] Vérifier le mode d'installation de PS7 (MSIX ou MSI, par utilisateur ou par machine) sur le parc.
+- [ ] Tester les scripts sous le compte SYSTEM : tâches planifiées, services, gestion d'appareils, remoting.
+- [ ] Tester les cmdlets DISM (par exemple `Add-WindowsCapability`) sous `pwsh`.
+- [ ] Redéployer les stratégies de journalisation PS7 (modules, blocs de script, transcription) et adapter la supervision, qui ne voit pas l'activité de PS7 si elle lit uniquement les journaux de 5.1.
+- [ ] Décider si le chargement implicite de la couche de compatibilité doit être désactivé (`DisableImplicitWinCompat`).
+- [ ] Planifier le cycle de vie : 5.1 devient une fonctionnalité à la demande puis disparaît ; les versions LTS de PS7 ont un support limité dans le temps.
+
 ### Validation
 
 - [ ] Exécuter les tests dans un environnement représentatif (mêmes OS, RSAT, modules, permissions, données).
@@ -263,20 +286,44 @@ L'objectif raisonnable : faire de PowerShell 7 l'environnement par défaut pour 
 
 ## Limites et points à vérifier
 
-- Le contenu provient d'un export PDF d'un outil de recherche assisté par IA ; il n'a pas été recoupé ligne à ligne avec la documentation officielle.
-- La date de 27H2 (second semestre 2027) est une estimation rapportée par la presse.
-- La ligne « Runtime » de l'export d'origine mentionnait « .NET Framework 4.5 » et « .NET Standard 2.0 » ; ces précisions ont été remplacées ici par des formulations génériques, à confirmer pour la version cible.
-- Le comportement de `$?` après écriture sur stderr, et le statut de `Appx` selon la version de PowerShell 7, sont à confirmer dans la documentation Microsoft Learn de la version visée.
-- Les URL ci-dessous ont été reconstruites : l'export d'origine avait perdu la ligature « ft » de `microsoft`. Vérifier qu'elles résolvent avant publication.
+Recoupement effectué le 24 novembre 2026 avec des pages Microsoft Learn, le blog de l'équipe PowerShell, le support Microsoft et la presse.
+
+**Confirmé**
+
+- `Appx` : le tableau de compatibilité Microsoft le classe « Natively Compatible » sur Windows 10 / Server 1809+, avec la mention de passer par la couche de compatibilité avec PowerShell 7.1. Le seuil exact de version reste à tester sur l'environnement cible.
+- Deny list par défaut de la couche de compatibilité : `PSScheduledJob`, `BestPractices`, `UpdateServices`.
+- Comportement de `PSModulePath` lors d'un lancement de `powershell.exe` via un processus intermédiaire (risque de `CommandNotFoundException`).
+- Côté PS7, `$?` d'un exécutable natif vaut vrai pour le code de sortie 0, faux sinon.
+- Côté 5.1, la ligne « Runtime » (.NET Framework v4.5) est confirmée par Microsoft Learn. La précision « .NET Standard 2.0 » côté PS7, présente dans l'export d'origine, a été remplacée par une formulation générique.
+
+**Corrigé**
+
+- `Microsoft.PowerShell.LocalAccounts` : indiqué « retiré » dans la première version de ce document. Il n'est plus livré avec PowerShell 7, mais le module fourni par Windows est classé « Natively Compatible » sur Windows 10 / Server 1809+.
+- Une phrase du PDF source suggérait que `Start-Process notepad &` crée un job ; l'exemple a été remplacé par `Get-Process &`.
+
+**À vérifier**
+
+- `$?` côté 5.1 : l'affirmation selon laquelle `$?` passait à faux quand un exécutable écrivait sur stderr n'est reprise ici que d'après une synthèse de presse (Next). Aucune page Microsoft lue directement ne la confirme. Test à lancer dans `powershell.exe` puis dans `pwsh.exe` : `$null = cmd /c "echo err 1>&2" 2>&1; $?`.
+- Date de fin de support de PowerShell 7.6 LTS (14 novembre 2028) : issue du PDF source, non recoupée.
+- Éléments MSIX (compte SYSTEM, DISM, paramètres machine) : sources secondaires uniquement.
+- Forme exacte `en-us` de l'URL `differences-from-windows-powershell` : reprise du lien cité par Next, non ouverte directement.
+- Nom et date de la prochaine version de Windows : estimation de la presse.
 
 ## Sources
 
-- Article d'origine (Next) : <https://next.ink/269400/powershell-7-va-integrer-windows-les-entreprises-vont-devoir-verifier-sa-compatibilite/>
+- Next, article d'origine : <https://next.ink/269400/powershell-7-va-integrer-windows-les-entreprises-vont-devoir-verifier-sa-compatibilite/>
 - The Register : <https://www.theregister.com/os-platforms/2026/11/18/powershell-7-heading-into-windows-as-51-hits-the-end-of-the-road/5310791>
 - Microsoft Support, dépréciation de Windows PowerShell 5.1 (KB5137172) : <https://support.microsoft.com/en-us/servicing/os/windows/docs/2026/11/kb5137172-windows-powershell-5-1-deprecation>
-- Microsoft Learn, migration de 5.1 vers 7 : <https://learn.microsoft.com/en-us/powershell/scripting/whats-new/migrating-from-windows-powershell-51-to-powershell-7>
-- Microsoft Learn, différences avec Windows PowerShell : <https://learn.microsoft.com/en-us/powershell/scripting/whats-new/differences-from-windows-powershell>
+- Blog PowerShell, « PowerShell 7 is coming to Windows » : <https://devblogs.microsoft.com/powershell/powershell-7-coming-to-windows/>
+- Microsoft Learn, migration de 5.1 vers 7 : <https://learn.microsoft.com/powershell/scripting/install/migrating-from-windows-powershell-51-to-powershell-7>
+- Microsoft Learn, différences avec Windows PowerShell : <https://learn.microsoft.com/en-us/powershell/scripting/whats-new/differences-from-windows-powershell?view=powershell-7.6>
 - Microsoft Learn, compatibilité des modules : <https://learn.microsoft.com/en-us/powershell/windows/module-compatibility>
 - Microsoft Learn, `about_Windows_PowerShell_Compatibility` : <https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_windows_powershell_compatibility>
-- Microsoft Learn, `about_PSModulePath` : <https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_psmodulepath>
-- Blog PowerShell, « PowerShell 7 coming to Windows » : <https://devblogs.microsoft.com/powershell/powershell-7-coming-to-windows/>
+- Microsoft Learn, `about_PSModulePath` : <https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_PSModulePath>
+- Microsoft Learn, `about_Error_Handling` : <https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_error_handling>
+- Techzine (MSIX, points ouverts) : <https://www.techzine.eu/news/applications/145897/powershell-7-will-be-included-by-default-in-the-next-windows-release/>
+- BetaNews (annonce Microsoft sur le calendrier de 5.1) : <https://betanews.com/article/microsoft-deprecation-windows-powershell-5-1/>
+
+## Licence
+
+Ce dépôt est distribué sous licence MIT. Voir le fichier [LICENSE](LICENSE).
