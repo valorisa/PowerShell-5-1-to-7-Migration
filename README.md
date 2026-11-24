@@ -96,7 +96,7 @@ Ces éléments viennent de sources secondaires : à confirmer dans la documentat
 | Modules machine | `%ProgramFiles%\WindowsPowerShell\Modules` | `%ProgramFiles%\PowerShell\Modules` | Prévoir un déploiement distinct des modules AllUsers pour PS7. |
 | Modules système | `%SystemRoot%\System32\WindowsPowerShell\1.0\Modules` | Inclut `%windir%\System32` au démarrage, mais n'expose que les modules marqués compatibles Core | Un module système peut être invisible ou refusé dans PS7 selon son manifeste. |
 | Encodage | Souvent Windows-1252 / ASCII selon le contexte | `$OutputEncoding` par défaut en UTF-8 sans BOM | Vérifier sorties, fichiers CSV, logs, accents et intégrations avec les outils externes. |
-| Erreurs natives | `$?` pouvait devenir faux quand l'exécutable écrivait sur stderr (non confirmé par une page Microsoft, voir [Limites](#limites-et-points-à-vérifier)) | `$?` suit le code de sortie : vrai si 0, faux sinon | Revoir les contrôles de réussite fondés sur `$?` et sur la présence de stderr. Avant PS7, `$?` était aussi remis à vrai dans `(...)`, `$(...)` et `@(...)`. |
+| Erreurs natives | Avec `2>&1`, `$?` passe à faux dès que l'exécutable écrit sur stderr, même avec le code de sortie 0 (constaté en test, voir [Limites](#limites-et-points-à-vérifier)) | `$?` suit le code de sortie : vrai si 0, faux sinon | Un contrôle fondé sur `$?` qui échouait sur stderr en 5.1 ne le fera plus en 7 : contrôler `$LASTEXITCODE`. Avant PS7, `$?` était aussi remis à vrai dans `(...)`, `$(...)` et `@(...)`. |
 | CSV | `Export-Csv` inclut les informations de type | `-NoTypeInformation` est le comportement par défaut | Ajouter `-IncludeTypeInformation` si un consommateur dépend de l'en-tête de type. |
 | Web | `Invoke-WebRequest` / `Invoke-RestMethod` sur l'ancienne pile .NET | Fondés sur `HttpClient` ; parsing HTML simplifié, en-têtes plus stricts, FTP et `file://` non supportés | Auditer les scripts d'API, de téléchargement, de formulaires et d'authentification. |
 | Remoting DCOM | Certains cmdlets acceptaient `-Protocol DCOM` | DCOM n'est plus supporté pour le remoting | Migrer vers WinRM/PSRP ou `Invoke-Command`. |
@@ -185,10 +185,10 @@ PowerShell 7 construit son chemin de modules dans l'ordre suivant : modules Curr
 | Lancer `powershell.exe` via un processus intermédiaire lancé par PS7 | Le processus intermédiaire peut transmettre le `PSModulePath` PS7 à 5.1 ; un module commun peut alors se résoudre vers une version PS7 incompatible et provoquer une `CommandNotFoundException`. |
 | Plusieurs versions d'un même module | PowerShell charge par défaut la version la plus élevée ; utiliser `Import-Module -FullyQualifiedName` pour épingler une version. |
 
-**Correction pour le processus intermédiaire** : supprimer `PSModulePath` de l'environnement du processus enfant.
+**Correction pour le processus intermédiaire** : supprimer `PSModulePath` de l'environnement du processus enfant. Utiliser `cmd.exe` avec son extension : si un fichier `cmd` sans extension précède `cmd.exe` dans le `PATH` (cas d'une installation MSYS2, constaté lors des tests), `cmd` seul ouvre une fenêtre de sélection d'application au lieu de lancer l'interpréteur.
 
 ```cmd
-cmd /c "set PSModulePath=&& powershell.exe -File script.ps1"
+cmd.exe /c "set PSModulePath=&& powershell.exe -File script.ps1"
 ```
 
 ### Profils
@@ -286,24 +286,29 @@ L'objectif raisonnable : faire de PowerShell 7 l'environnement par défaut pour 
 
 ## Limites et points à vérifier
 
-Recoupement effectué le 24 novembre 2026 avec des pages Microsoft Learn, le blog de l'équipe PowerShell, le support Microsoft et la presse.
+Recoupement effectué le 24 novembre 2026 avec des pages Microsoft Learn, le blog de l'équipe PowerShell, le support Microsoft et la presse, complété par un test sur Windows 11.
 
 **Confirmé**
 
 - `Appx` : le tableau de compatibilité Microsoft le classe « Natively Compatible » sur Windows 10 / Server 1809+, avec la mention de passer par la couche de compatibilité avec PowerShell 7.1. Le seuil exact de version reste à tester sur l'environnement cible.
 - Deny list par défaut de la couche de compatibilité : `PSScheduledJob`, `BestPractices`, `UpdateServices`.
 - Comportement de `PSModulePath` lors d'un lancement de `powershell.exe` via un processus intermédiaire (risque de `CommandNotFoundException`).
-- Côté PS7, `$?` d'un exécutable natif vaut vrai pour le code de sortie 0, faux sinon.
+- Côté PS7, `$?` d'un exécutable natif vaut vrai pour le code de sortie 0, faux sinon (Microsoft Learn).
+- `$?` et stderr : test réalisé le 24 novembre 2026 sous Windows 11, dans une console, avec Windows PowerShell 5.1.26100.10068 et PowerShell 7.6.10, `cmd.exe` appelé par son chemin complet et `2>&1`.
+  - Écriture sur stderr avec le code de sortie 0 : `$?` = False en 5.1, True en 7.
+  - Code de sortie 3 : `$?` = False dans les deux éditions, `$LASTEXITCODE` = 3.
+  - `(Write-Error)` : `$?` = True en 5.1, False en 7, ce qui est conforme à la documentation Microsoft.
+  - Le test n'a pas couvert l'absence de redirection `2>&1`, les hôtes autres que la console (ISE, VS Code) ni d'autres versions.
 - Côté 5.1, la ligne « Runtime » (.NET Framework v4.5) est confirmée par Microsoft Learn. La précision « .NET Standard 2.0 » côté PS7, présente dans l'export d'origine, a été remplacée par une formulation générique.
 
 **Corrigé**
 
 - `Microsoft.PowerShell.LocalAccounts` : indiqué « retiré » dans la première version de ce document. Il n'est plus livré avec PowerShell 7, mais le module fourni par Windows est classé « Natively Compatible » sur Windows 10 / Server 1809+.
 - Une phrase du PDF source suggérait que `Start-Process notepad &` crée un job ; l'exemple a été remplacé par `Get-Process &`.
+- Exemple `PSModulePath` : `cmd` remplacé par `cmd.exe`, car `cmd` seul peut désigner un autre fichier du `PATH`.
 
 **À vérifier**
 
-- `$?` côté 5.1 : l'affirmation selon laquelle `$?` passait à faux quand un exécutable écrivait sur stderr n'est reprise ici que d'après une synthèse de presse (Next). Aucune page Microsoft lue directement ne la confirme. Test à lancer dans `powershell.exe` puis dans `pwsh.exe` : `$null = cmd /c "echo err 1>&2" 2>&1; $?`.
 - Date de fin de support de PowerShell 7.6 LTS (14 novembre 2028) : issue du PDF source, non recoupée.
 - Éléments MSIX (compte SYSTEM, DISM, paramètres machine) : sources secondaires uniquement.
 - Forme exacte `en-us` de l'URL `differences-from-windows-powershell` : reprise du lien cité par Next, non ouverte directement.
